@@ -1,11 +1,8 @@
-use fnv::{FnvHashMap, FnvHashSet};
-use libp2p::core::connection::{ConnectedPoint, ConnectionId};
-use libp2p::identify::IdentifyInfo;
-use libp2p::swarm::protocols_handler::DummyProtocolsHandler;
-use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourAction, PollParameters};
-use libp2p::{Multiaddr, PeerId};
 use std::task::{Context, Poll};
 use std::time::Duration;
+use fnv::{FnvHashMap, FnvHashSet};
+use libp2p_rs::core::{Multiaddr, PeerId};
+
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PeerInfo {
@@ -104,90 +101,90 @@ impl AddressBook {
         }
     }
 
-    pub fn set_info(&mut self, peer_id: &PeerId, identify: IdentifyInfo) {
-        if let Some(info) = self.peers.get_mut(peer_id) {
-            info.protocol_version = Some(identify.protocol_version);
-            info.agent_version = Some(identify.agent_version);
-            info.protocols = identify.protocols;
-        }
-    }
+    // pub fn set_info(&mut self, peer_id: &PeerId, identify: IdentifyInfo) {
+    //     if let Some(info) = self.peers.get_mut(peer_id) {
+    //         info.protocol_version = Some(identify.protocol_version);
+    //         info.agent_version = Some(identify.agent_version);
+    //         info.protocols = identify.protocols;
+    //     }
+    // }
 }
-
-impl NetworkBehaviour for AddressBook {
-    type ProtocolsHandler = DummyProtocolsHandler;
-    type OutEvent = void::Void;
-
-    fn new_handler(&mut self) -> Self::ProtocolsHandler {
-        Default::default()
-    }
-
-    fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
-        if let Some(info) = self.peers.get(peer_id) {
-            info.addresses().map(|(addr, _)| addr.clone()).collect()
-        } else {
-            vec![]
-        }
-    }
-
-    fn inject_connected(&mut self, _peer_id: &PeerId) {}
-
-    fn inject_disconnected(&mut self, _peer_id: &PeerId) {}
-
-    fn inject_event(&mut self, _peer_id: PeerId, _connection: ConnectionId, _event: void::Void) {}
-
-    fn poll(
-        &mut self,
-        _cx: &mut Context,
-        _params: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<void::Void, void::Void>> {
-        Poll::Pending
-    }
-
-    fn inject_connection_established(
-        &mut self,
-        peer_id: &PeerId,
-        _: &ConnectionId,
-        conn: &ConnectedPoint,
-    ) {
-        let conn = (*peer_id, conn.get_remote_address().clone());
-        self.connections.insert(conn);
-    }
-
-    fn inject_address_change(
-        &mut self,
-        peer_id: &PeerId,
-        _: &ConnectionId,
-        old: &ConnectedPoint,
-        new: &ConnectedPoint,
-    ) {
-        let old = (*peer_id, old.get_remote_address().clone());
-        let new = (*peer_id, new.get_remote_address().clone());
-        self.connections.remove(&old);
-        self.connections.insert(new);
-    }
-
-    fn inject_connection_closed(
-        &mut self,
-        peer_id: &PeerId,
-        _: &ConnectionId,
-        conn: &ConnectedPoint,
-    ) {
-        let conn = (*peer_id, conn.get_remote_address().clone());
-        self.connections.remove(&conn);
-    }
-
-    fn inject_addr_reach_failure(
-        &mut self,
-        peer_id: Option<&PeerId>,
-        addr: &Multiaddr,
-        _error: &dyn std::error::Error,
-    ) {
-        if let Some(peer_id) = peer_id {
-            self.remove_address(peer_id, addr);
-        }
-    }
-
-    fn inject_dial_failure(&mut self, peer_id: &PeerId) {
-        self.peers.remove(peer_id);
-    }
-}
+//
+// impl NetworkBehaviour for AddressBook {
+//     type ProtocolsHandler = DummyProtocolsHandler;
+//     type OutEvent = void::Void;
+//
+//     fn new_handler(&mut self) -> Self::ProtocolsHandler {
+//         Default::default()
+//     }
+//
+//     fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
+//         if let Some(info) = self.peers.get(peer_id) {
+//             info.addresses().map(|(addr, _)| addr.clone()).collect()
+//         } else {
+//             vec![]
+//         }
+//     }
+//
+//     fn inject_connected(&mut self, _peer_id: &PeerId) {}
+//
+//     fn inject_disconnected(&mut self, _peer_id: &PeerId) {}
+//
+//     fn inject_event(&mut self, _peer_id: PeerId, _connection: ConnectionId, _event: void::Void) {}
+//
+//     fn poll(
+//         &mut self,
+//         _cx: &mut Context,
+//         _params: &mut impl PollParameters,
+//     ) -> Poll<NetworkBehaviourAction<void::Void, void::Void>> {
+//         Poll::Pending
+//     }
+//
+//     fn inject_connection_established(
+//         &mut self,
+//         peer_id: &PeerId,
+//         _: &ConnectionId,
+//         conn: &ConnectedPoint,
+//     ) {
+//         let conn = (*peer_id, conn.get_remote_address().clone());
+//         self.connections.insert(conn);
+//     }
+//
+//     fn inject_address_change(
+//         &mut self,
+//         peer_id: &PeerId,
+//         _: &ConnectionId,
+//         old: &ConnectedPoint,
+//         new: &ConnectedPoint,
+//     ) {
+//         let old = (*peer_id, old.get_remote_address().clone());
+//         let new = (*peer_id, new.get_remote_address().clone());
+//         self.connections.remove(&old);
+//         self.connections.insert(new);
+//     }
+//
+//     fn inject_connection_closed(
+//         &mut self,
+//         peer_id: &PeerId,
+//         _: &ConnectionId,
+//         conn: &ConnectedPoint,
+//     ) {
+//         let conn = (*peer_id, conn.get_remote_address().clone());
+//         self.connections.remove(&conn);
+//     }
+//
+//     fn inject_addr_reach_failure(
+//         &mut self,
+//         peer_id: Option<&PeerId>,
+//         addr: &Multiaddr,
+//         _error: &dyn std::error::Error,
+//     ) {
+//         if let Some(peer_id) = peer_id {
+//             self.remove_address(peer_id, addr);
+//         }
+//     }
+//
+//     fn inject_dial_failure(&mut self, peer_id: &PeerId) {
+//         self.peers.remove(peer_id);
+//     }
+// }

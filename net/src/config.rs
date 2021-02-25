@@ -1,8 +1,7 @@
-use libp2p::core::PeerId;
-use libp2p::identity::{Keypair, PublicKey};
-use libp2p::pnet::PreSharedKey;
 use std::num::NonZeroU16;
 use std::time::Duration;
+use libp2p_rs::core::identity::Keypair;
+use libp2p_rs::core::{PublicKey, PeerId, Multiaddr};
 
 /// Network configuration.
 #[derive(Clone)]
@@ -11,6 +10,10 @@ pub struct NetworkConfig {
     pub node_key: Keypair,
     /// Name of the node. Sent over the wire for debugging purposes.
     pub node_name: String,
+    /// Bound listening addresses; by default the node will not listen on any address.
+    pub listening_addrs: Vec<Multiaddr>,
+    /// The peers to connect to on startup.
+    pub bootstrap: Vec<(Multiaddr, PeerId)>,
     /// Enable mdns.
     pub enable_mdns: bool,
     /// Enable kad.
@@ -23,8 +26,8 @@ pub struct NetworkConfig {
     pub bitswap_connection_keepalive: Duration,
     /// Bitswap inbound requests per peer limit.
     pub bitswap_receive_limit: NonZeroU16,
-    /// Pre shared key for pnet.
-    pub psk: Option<PreSharedKey>,
+    // /// Pre shared key for pnet.
+    // pub psk: Option<PreSharedKey>,
 }
 
 impl NetworkConfig {
@@ -38,10 +41,12 @@ impl NetworkConfig {
             node_name: names::Generator::with_naming(names::Name::Numbered)
                 .next()
                 .unwrap(),
+            listening_addrs: vec![],
             bitswap_request_timeout: Duration::from_secs(10),
             bitswap_connection_keepalive: Duration::from_secs(10),
             bitswap_receive_limit: NonZeroU16::new(20).expect("20 > 0"),
-            psk: None,
+            //psk: None,
+            bootstrap: vec![]
         }
     }
 

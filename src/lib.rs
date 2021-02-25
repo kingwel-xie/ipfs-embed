@@ -13,12 +13,10 @@
 use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::stream::{Stream, StreamExt};
-pub use ipfs_embed_net::SyncEvent;
 pub use ipfs_embed_net::{
-    AddressRecord, AddressSource, Key, Multiaddr, NetworkConfig, PeerId, PeerInfo, PeerRecord,
-    Quorum, Record, SyncQuery,
+    AddressSource, Key, Multiaddr, NetworkConfig, PeerId, PeerInfo, Record,
 };
-use ipfs_embed_net::{BitswapStore, NetworkService};
+use ipfs_embed_net::{BitswapStore, NetworkService, Keypair};
 pub use ipfs_embed_sqlite::{StorageConfig, TempPin};
 use ipfs_embed_sqlite::{StorageEvent, StorageService};
 use libipld::codec::References;
@@ -54,6 +52,7 @@ impl Config {
 /// Ipfs node.
 #[derive(Clone)]
 pub struct Ipfs<P: StoreParams> {
+    keypair: Keypair,
     storage: StorageService<P>,
     network: NetworkService<P>,
 }
@@ -92,126 +91,148 @@ where
     /// This starts three background tasks. The swarm, garbage collector and the dht cleanup
     /// tasks run in the background.
     pub async fn new(config: Config) -> Result<Self> {
+        let keypair = config.network.node_key.clone();
+
         let (tx, mut storage_events) = mpsc::unbounded();
         let storage = StorageService::open(config.storage, tx)?;
         let bitswap = BitswapStorage(storage.clone());
         let network = NetworkService::new(config.network, bitswap).await?;
         let network2 = network.clone();
+
         async_global_executor::spawn(async move {
             while let Some(StorageEvent::Remove(cid)) = storage_events.next().await {
-                network2.unprovide(cid);
+                //network2.unprovide(cid);
             }
         })
         .detach();
-        Ok(Self { storage, network })
+        Ok(Self { keypair, storage, network })
     }
 
     /// Returns the local `PeerId`.
     pub fn local_peer_id(&self) -> PeerId {
-        self.network.local_peer_id()
+        self.keypair.public().into_peer_id()
     }
 
-    /// Listens on a new `Multiaddr`.
-    pub async fn listen_on(&self, addr: Multiaddr) -> Result<Multiaddr> {
-        self.network.listen_on(addr).await
-    }
+    // /// Listens on a new `Multiaddr`.
+    // pub async fn listen_on(&self, addr: Multiaddr) -> Result<Multiaddr> {
+    //     self.network.listen_on(addr).await
+    // }
 
-    /// Returns the currently active listener addresses.
-    pub fn listeners(&self) -> Vec<Multiaddr> {
-        self.network.listeners()
-    }
-
-    /// Adds an external address.
-    pub fn add_external_address(&self, addr: Multiaddr) {
-        self.network.add_external_address(addr)
-    }
-
-    /// Returns the currently used external addresses.
-    pub fn external_addresses(&self) -> Vec<AddressRecord> {
-        self.network.external_addresses()
-    }
-
-    /// Adds a known `Multiaddr` for a `PeerId`.
-    pub fn add_address(&self, peer: &PeerId, addr: Multiaddr) {
-        self.network.add_address(peer, addr)
-    }
-
-    /// Removes a `Multiaddr` for a `PeerId`.
-    pub fn remove_address(&self, peer: &PeerId, addr: &Multiaddr) {
-        self.network.remove_address(peer, addr)
-    }
+    // /// Returns the currently active listener addresses.
+    // pub fn listeners(&self) -> Vec<Multiaddr> {
+    //     self.network.listeners()
+    // }
+    //
+    // /// Adds an external address.
+    // pub fn add_external_address(&self, addr: Multiaddr) {
+    //     self.network.add_external_address(addr)
+    // }
+    //
+    // /// Returns the currently used external addresses.
+    // pub fn external_addresses(&self) -> Vec<AddressRecord> {
+    //     self.network.external_addresses()
+    // }
+    //
+    // /// Adds a known `Multiaddr` for a `PeerId`.
+    // pub fn add_address(&self, peer: &PeerId, addr: Multiaddr) {
+    //     self.network.add_address(peer, addr)
+    // }
+    //
+    // /// Removes a `Multiaddr` for a `PeerId`.
+    // pub fn remove_address(&self, peer: &PeerId, addr: &Multiaddr) {
+    //     self.network.remove_address(peer, addr)
+    // }
 
     /// Dials a `PeerId` using a known address.
-    pub fn dial(&self, peer: &PeerId) -> Result<()> {
-        self.network.dial(peer)
+    pub async fn dial(&self, peer: &PeerId) -> Result<()> {
+        let _= self.network.swarm().new_connection(*peer).await?;
+        Ok(())
     }
 
     /// Dials a `PeerId` using `Multiaddr`.
-    pub fn dial_address(&self, peer: &PeerId, addr: Multiaddr) -> Result<()> {
-        self.network.add_address(peer, addr);
-        self.network.dial(peer)
+    pub async fn dial_address(&self, peer: &PeerId, addr: Multiaddr) -> Result<()> {
+        let _= self.network.swarm().connect_with_addrs(*peer, vec![addr]).await?;
+        Ok(())
     }
 
-    /// Bans a `PeerId` from the swarm, dropping all existing connections and
-    /// preventing new connections from the peer.
-    pub fn ban(&self, peer: PeerId) {
-        self.network.ban(peer)
-    }
-
-    /// Unbans a previously banned `PeerId`.
-    pub fn unban(&self, peer: PeerId) {
-        self.network.unban(peer)
-    }
+    // /// Bans a `PeerId` from the swarm, dropping all existing connections and
+    // /// preventing new connections from the peer.
+    // pub fn ban(&self, peer: PeerId) {
+    //     self.network.ban(peer)
+    // }
+    //
+    // /// Unbans a previously banned `PeerId`.
+    // pub fn unban(&self, peer: PeerId) {
+    //     self.network.unban(peer)
+    // }
 
     /// Returns the known peers.
     pub fn peers(&self) -> Vec<PeerId> {
-        self.network.peers()
+        self.network.swarm().get_peers()
     }
 
     /// Returns a list of connected peers.
-    pub fn connections(&self) -> Vec<(PeerId, Multiaddr)> {
-        self.network.connections()
+    pub async fn connections(&self) -> Vec<(PeerId, Multiaddr)> {
+        let connections = self.network.swarm().dump_connections(None)
+            .await
+            .unwrap_or_default();
+
+        let cc = connections
+            .into_iter()
+            .map(|c| {
+                (c.info.remote_peer_id, c.info.remote_peer_id)
+            })
+            .collect();
+
+        cc
     }
 
-    /// Returns the `PeerInfo` of a peer.
-    pub fn peer_info(&self, peer: &PeerId) -> Option<PeerInfo> {
-        self.network.peer_info(peer)
-    }
+    // /// Returns the `PeerInfo` of a peer.
+    // pub fn peer_info(&self, peer: &PeerId) -> Option<PeerInfo> {
+    //     self.network.peer_info(peer)
+    // }
 
     /// Bootstraps the dht using a set of bootstrap nodes. After bootstrap completes it
     /// provides all blocks in the block store.
     pub async fn bootstrap(&self, nodes: &[(PeerId, Multiaddr)]) -> Result<()> {
-        self.network.bootstrap(nodes).await?;
+        for (peer, addr) in nodes {
+            self.network.kad().add_node(*peer, vec![*addr]).await;
+        }
+        self.network.kad().bootstrap().await?;
+
         for cid in self.storage.iter()? {
-            let _ = self.network.provide(cid);
+            let _ = self.network.kad().provide(cid.to_bytes()).await;
         }
         Ok(())
     }
 
     /// Gets a record from the dht.
-    pub async fn get_record(&self, key: &Key, quorum: Quorum) -> Result<Vec<PeerRecord>> {
-        self.network.get_record(key, quorum).await
+    pub async fn get_record(&self, key: &Key) -> Result<Vec<u8>> {
+        let r = self.network.kad().get_value(key.to_vec()).await?;
+        Ok(r)
     }
 
     /// Puts a new record in the dht.
-    pub async fn put_record(&self, record: Record, quorum: Quorum) -> Result<()> {
-        self.network.put_record(record, quorum).await
+    pub async fn put_record(&self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        let _ = self.network.kad().put_value(key, value).await?;
+        Ok(())
     }
 
-    /// Removes a record from the dht.
-    pub fn remove_record(&self, key: &Key) {
-        self.network.remove_record(key)
-    }
+    // /// Removes a record from the dht.
+    // pub fn remove_record(&self, key: &Key) {
+    //     self.network.remove_record(key)
+    // }
 
     /// Subscribes to a `topic` returning a `Stream` of messages. If all `Stream`s for
     /// a topic are dropped it unsubscribes from the `topic`.
-    pub fn subscribe(&self, topic: &str) -> Result<impl Stream<Item = Vec<u8>>> {
-        self.network.subscribe(topic)
+    pub async fn subscribe(&self, topic: &str) -> Result<Subscription> {
+        let r = self.network.pubsub().subscribe(topic.into()).await;
     }
 
     /// Publishes a new message in a `topic`, sending the message to all subscribed peers.
     pub fn publish(&self, topic: &str, msg: Vec<u8>) -> Result<()> {
-        self.network.publish(topic, msg)
+        let _ = self.network.pubsub().publish(topic.into(), msg).await;
+        Ok(())
     }
 
     /// Creates a temporary pin in the block store. A temporary pin is not persisted to disk
@@ -265,7 +286,7 @@ where
     pub fn insert(&self, block: &Block<P>) -> Result<impl Future<Output = Result<()>> + '_> {
         let cid = *block.cid();
         self.storage.insert(block)?;
-        Ok(self.network.provide(cid))
+        Ok(self.network.kad().provide(cid.to_bytes()))
     }
 
     /// Manually runs garbage collection to completion. This is mainly useful for testing and
