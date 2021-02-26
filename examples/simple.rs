@@ -14,8 +14,7 @@ struct Identity {
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache_size = 10;
-    let ipfs = Ipfs::<DefaultParams>::new(Config::new(None, cache_size)).await?;
-    ipfs.listen_on("/ip4/0.0.0.0/tcp/0".parse()?).await?;
+    let ipfs = Ipfs::<DefaultParams>::new(Config::new(None, cache_size, "/ip4/0.0.0.0/tcp/0".parse()?)).await?;
 
     let identity = Identity {
         id: 0,

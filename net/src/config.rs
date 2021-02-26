@@ -32,7 +32,7 @@ pub struct NetworkConfig {
 
 impl NetworkConfig {
     /// Creates a new network configuration.
-    pub fn new() -> Self {
+    pub fn new(listening_addrs: Vec<Multiaddr>) -> Self {
         Self {
             enable_mdns: true,
             enable_kad: true,
@@ -41,7 +41,7 @@ impl NetworkConfig {
             node_name: names::Generator::with_naming(names::Name::Numbered)
                 .next()
                 .unwrap(),
-            listening_addrs: vec![],
+            listening_addrs,
             bitswap_request_timeout: Duration::from_secs(10),
             bitswap_connection_keepalive: Duration::from_secs(10),
             bitswap_receive_limit: NonZeroU16::new(20).expect("20 > 0"),
@@ -63,7 +63,7 @@ impl NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
-        Self::new()
+        Self::new(vec![])
     }
 }
 

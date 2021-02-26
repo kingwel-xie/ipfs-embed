@@ -103,10 +103,9 @@ pub struct BlockChain {
 impl BlockChain {
     pub async fn open<P: AsRef<Path>>(path: P, cache_size: u64) -> Result<Self> {
         let index = sled::open(path.as_ref().join("index"))?;
-        let config = Config::new(Some(path.as_ref().join("blocks")), cache_size);
+        let config = Config::new(Some(path.as_ref().join("blocks")), cache_size, "/ip4/127.0.0.1/tcp/0".parse().unwrap());
         //let config = Config::new(None, cache_size);
         let ipfs = Ipfs::new(config).await?;
-        ipfs.listen_on("/ip4/127.0.0.1/tcp/0".parse()?).await?;
         let root_cid = ipfs.resolve(ROOT)?;
         let mut chain = Self {
             index,

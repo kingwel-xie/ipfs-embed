@@ -6,8 +6,8 @@
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # use ipfs_embed::{Config, DefaultParams, Ipfs};
 //! # let cache_size = 100;
-//! let ipfs = Ipfs::<DefaultParams>::new(Config::new(None, cache_size)).await?;
-//! ipfs.listen_on("/ip4/0.0.0.0/tcp/0".parse()?).await?;
+//! let ipfs = Ipfs::<DefaultParams>::new(Config::new(None, cache_size, "/ip4/0.0.0.0/tcp/0".parse().unwrap())).await?;
+//! ipfs.listen_on(?).await?;
 //! # Ok(()) }
 //! ```
 use async_trait::async_trait;
@@ -41,10 +41,10 @@ pub struct Config {
 impl Config {
     /// Creates a default configuration from a `path` and a `cache_size`. If the `path` is `None`,
     /// ipfs will use an in-memory block store.
-    pub fn new(path: Option<std::path::PathBuf>, cache_size: u64) -> Self {
+    pub fn new(path: Option<std::path::PathBuf>, cache_size: u64, listen_addr: Multiaddr) -> Self {
         let sweep_interval = std::time::Duration::from_millis(10000);
         let storage = StorageConfig::new(path, cache_size, sweep_interval);
-        let network = NetworkConfig::new();
+        let network = NetworkConfig::new(vec![listen_addr]);
         Self { storage, network }
     }
 }
@@ -54,17 +54,16 @@ impl Config {
 pub struct Ipfs<P: StoreParams> {
     keypair: Keypair,
     storage: StorageService<P>,
-    network: NetworkService<P>,
+    network: NetworkService,
 }
 
+#[derive(Clone)]
 struct BitswapStorage<P: StoreParams>(StorageService<P>);
 
 impl<P: StoreParams> BitswapStore for BitswapStorage<P>
 where
     Ipld: References<P::Codecs>,
 {
-    type Params = P;
-
     fn contains(&mut self, cid: &Cid) -> Result<bool> {
         self.0.contains(cid)
     }
@@ -435,12 +434,11 @@ mod tests {
         let sweep_interval = Duration::from_millis(10000);
         let storage = StorageConfig::new(None, 10, sweep_interval);
 
-        let mut network = NetworkConfig::new();
+        let mut network = NetworkConfig::new(vec!["/ip4/127.0.0.1/tcp/0".parse()?]);
         network.enable_mdns = enable_mdns;
         network.allow_non_globals_in_dht = true;
 
         let ipfs = Ipfs::new(Config { storage, network }).await?;
-        ipfs.listen_on("/ip4/127.0.0.1/tcp/0".parse()?).await?;
         Ok(ipfs)
     }
 

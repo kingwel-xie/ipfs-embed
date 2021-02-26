@@ -20,7 +20,7 @@ use libp2p_rs::swarm::{Control as SwarmControl, Swarm};
 use libp2p_rs::kad::Control as KadControl;
 //use libp2p_rs::mdns::control::Control as MdnsControl;
 use libp2p_rs::floodsub::control::Control as FloodsubControl;
-//use bitswap::Control as BitswapControl;
+use bitswap::Control as BitswapControl;
 
 use libp2p_rs::kad::store::MemoryStore;
 use libp2p_rs::swarm::identify::IdentifyConfig;
@@ -38,21 +38,22 @@ use libp2p_rs::tcp::TcpConfig;
 pub use crate::config::NetworkConfig;
 pub use crate::peers::{AddressSource, PeerInfo};
 pub use bitswap::BitswapStore;
+use bitswap::Bitswap;
 
 
 #[derive(Clone)]
-pub struct NetworkService<P: StoreParams> {
+pub struct NetworkService {
     //repo: Repo<Types>,
 
     swarm: SwarmControl,
     kad: KadControl,
     pubsub: FloodsubControl,
     // mdns: MdnsControl,
-    //bitswap: BitswapControl,
+    bitswap: BitswapControl,
 }
 
-impl<P: StoreParams> NetworkService<P> {
-    pub async fn new<S: BitswapStore<Params = P>>(config: NetworkConfig, store: S) -> Result<Self> {
+impl NetworkService {
+    pub async fn new<S: BitswapStore>(config: NetworkConfig, repo: S) -> Result<Self> {
         let sec_secio = secio::Config::new(config.node_key.clone());
         // Set up an encrypted TCP transport over the Yamux or Mplex protocol.
         let xx_keypair = noise::Keypair::<noise::X25519Spec>::new()
@@ -97,12 +98,12 @@ impl<P: StoreParams> NetworkService<P> {
         // register floodsub into Swarm
         swarm = swarm.with_protocol(floodsub);
 
-        // // bitswap
-        // let bitswap = Bitswap::new(repo.clone(), kad_control.clone());
-        // let bitswap_control = bitswap.control();
-        //
-        // // register bitswap into Swarm
-        // swarm = swarm.with_protocol(bitswap);
+        // bitswap
+        let bitswap = Bitswap::new(repo, kad_control.clone());
+        let bitswap_control = bitswap.control();
+
+        // register bitswap into Swarm
+        swarm = swarm.with_protocol(bitswap);
 
         // To start Swarm/Kad/... main loops
         swarm.start();
@@ -117,7 +118,7 @@ impl<P: StoreParams> NetworkService<P> {
             swarm: swarm_control,
             kad: kad_control,
             pubsub: floodsub_control,
-            //bitswap: bitswap_control,
+            bitswap: bitswap_control,
             //mdns: ()
         })
     }
