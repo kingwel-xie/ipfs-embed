@@ -14,7 +14,7 @@ fnv = "1.0.7"
 futures = "0.3.12"
 ip_network = "0.3.4"
 libipld = { version = "0.10.0", default-features = false }
-bitswap = { version = "0.1.0", path = "../../bitswap" }
+bitswap = { version = "0.1.0", path = "../bitswap" }
 libp2p-rs = { git = "https://github.com/kingwel-xie/libp2p-rs.git", branch = "master", default-features = true }
 names = "0.11.0"
 prometheus = "0.11.0"
