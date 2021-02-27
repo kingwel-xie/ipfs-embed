@@ -1,13 +1,7 @@
-use std::fmt::Debug;
-use std::error::Error;
 
-use libipld::error::BlockNotFound;
-use libipld::{Cid, Result};
+use libipld::{Cid, Block, Result};
 use libipld::store::StoreParams;
 
-use async_trait::async_trait;
-
-pub type Block = libipld::Block<libipld::DefaultParams>;
 
 
 //
@@ -65,12 +59,14 @@ pub type Block = libipld::Block<libipld::DefaultParams>;
 
 /// Trait implemented by a block store.
 pub trait BitswapStore: Clone + Send + Sync + 'static {
+    /// The store params.
+    type Params: StoreParams;
     /// A have query needs to know if the block store contains the block.
     fn contains(&mut self, cid: &Cid) -> Result<bool>;
     /// A block query needs to retrieve the block from the store.
     fn get(&mut self, cid: &Cid) -> Result<Option<Vec<u8>>>;
     /// A block response needs to insert the block into the store.
-    fn insert(&mut self, block: Block) -> Result<()>;
+    fn insert(&mut self, block: &Block<Self::Params>) -> Result<()>;
     /// A sync query needs a list of missing blocks to make progress.
     fn missing_blocks(&mut self, cid: &Cid) -> Result<Vec<Cid>>;
 }

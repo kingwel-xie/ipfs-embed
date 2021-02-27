@@ -5,7 +5,6 @@ use libipld::Result;
 use libipld::multihash;
 
 use unsigned_varint::{decode as varint_decode, encode as varint_encode};
-use crate::error::BitswapError;
 
 /// Prefix represents all metadata of a CID, without the actual content.
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -66,9 +65,10 @@ impl Prefix {
 
     /// Create a CID out of the prefix and some data that will be hashed
     pub fn to_cid(&self, data: &[u8]) -> Result<Cid> {
+        use libipld::multihash::MultihashDigest;
         let mut hash = self.mh_type.digest(data);
         if self.mh_len < hash.digest().len() {
-            hash = multihash::Multihash::wrap(hash.algorithm(), &hash.digest()[..self.mh_len]);
+            hash = multihash::Multihash::wrap(self.mh_type.into(), &hash.digest()[..self.mh_len]).unwrap();
         }
         let cid = Cid::new(self.version, self.codec, hash)?;
         Ok(cid)
@@ -80,7 +80,7 @@ impl From<&Cid> for Prefix {
         Self {
             version: cid.version(),
             codec: cid.codec(),
-            mh_type: cid.hash().algorithm(),
+            mh_type: multihash::Code::try_from(cid.hash().code()).unwrap(),
             mh_len: cid.hash().digest().len(),
         }
     }

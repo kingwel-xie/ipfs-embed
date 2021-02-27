@@ -2,33 +2,42 @@ use prost::Message as ProstMessage;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::mem;
-use libipld::{Cid, Result};
+use libipld::{Cid, Block, Result};
 
-use crate::block::Block;
 use crate::bitswap_pb;
-use crate::error::BitswapError;
 use crate::prefix::Prefix;
+use libipld::store::StoreParams;
 
 pub type Priority = i32;
 
 /// The Ledger contains the history of transactions with a peer.
-#[derive(Debug, Default)]
-pub struct Ledger {
+#[derive(Debug)]
+pub struct Ledger<P: StoreParams> {
     /// The list of wanted blocks sent to the peer.
     sent_want_list: HashMap<Cid, Priority>,
     /// The list of wanted blocks received from the peer.
     pub(crate) received_want_list: HashMap<Cid, Priority>,
     /// Queued message.
-    message: Message,
+    message: Message<P>,
 }
 
-impl Ledger {
+impl<P: StoreParams> Default for Ledger<P> {
+    fn default() -> Self {
+        Self {
+            sent_want_list: Default::default(),
+            received_want_list: Default::default(),
+            message: Message::default()
+        }
+    }
+}
+
+impl<P: StoreParams> Ledger<P> {
     /// Creates a new `PeerLedger`.
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add_block(&mut self, block: Block) {
+    pub fn add_block(&mut self, block: Block<P>) {
         self.message.add_block(block);
     }
 
@@ -48,7 +57,7 @@ impl Ledger {
             .collect()
     }
 
-    pub fn send(&mut self) -> Option<Message> {
+    pub fn send(&mut self) -> Option<Message<P>> {
         if self.message.is_empty() {
             return None;
         }
@@ -65,8 +74,8 @@ impl Ledger {
 }
 
 /// A bitswap message.
-#[derive(Clone, PartialEq, Default)]
-pub struct Message {
+#[derive(Clone, PartialEq)]
+pub struct Message<P: StoreParams> {
     /// List of wanted blocks.
     want: HashMap<Cid, Priority>,
     /// List of blocks to cancel.
@@ -74,17 +83,28 @@ pub struct Message {
     /// Whether it is the full list of wanted blocks.
     full: bool,
     /// List of blocks to send.
-    pub(crate) blocks: Vec<Block>,
+    pub(crate) blocks: Vec<Block<P>>,
 }
 
-impl Message {
+impl<P: StoreParams> Default for Message<P> {
+    fn default() -> Self {
+        Self {
+            want: Default::default(),
+            cancel: Default::default(),
+            full: false,
+            blocks: vec![]
+        }
+    }
+}
+
+impl<P: StoreParams> Message<P> {
     /// Checks whether the queued message is empty.
     pub fn is_empty(&self) -> bool {
         self.want.is_empty() && self.cancel.is_empty() && self.blocks.is_empty()
     }
 
     /// Returns the list of blocks.
-    pub fn blocks(&self) -> &[Block] {
+    pub fn blocks(&self) -> &[Block<P>] {
         &self.blocks
     }
 
@@ -101,7 +121,7 @@ impl Message {
     }
 
     /// Returns the list of blocks, moves ownership.
-    pub fn take_blocks(&mut self) -> Vec<Block> {
+    pub fn take_blocks(&mut self) -> Vec<Block<P>> {
         mem::take(&mut self.blocks)
     }
 
@@ -116,7 +136,7 @@ impl Message {
     }
 
     /// Adds a `Block` to the message.
-    pub fn add_block(&mut self, block: Block) {
+    pub fn add_block(&mut self, block: Block<P>) {
         self.blocks.push(block);
     }
 
@@ -142,7 +162,7 @@ impl Message {
     }
 }
 
-impl Into<Vec<u8>> for &Message {
+impl<P: StoreParams> Into<Vec<u8>> for &Message<P> {
     fn into(self) -> Vec<u8> {
         let mut proto = bitswap_pb::Message::default();
         let mut wantlist = bitswap_pb::message::Wantlist::default();
@@ -180,7 +200,7 @@ impl Into<Vec<u8>> for &Message {
     }
 }
 
-impl Message {
+impl<P: StoreParams> Message<P> {
     /// Turns this `Message` into a message that can be sent to a substream.
     pub fn to_bytes(&self) -> Vec<u8> {
         self.into()
@@ -192,13 +212,13 @@ impl Message {
     }
 }
 
-impl From<()> for Message {
+impl<P: StoreParams> From<()> for Message<P> {
     fn from(_: ()) -> Self {
         Default::default()
     }
 }
 
-impl TryFrom<&[u8]> for Message {
+impl<P: StoreParams> TryFrom<&[u8]> for Message<P> {
     type Error = libipld::error::Error;
     fn try_from(bytes: &[u8]) -> std::result::Result<Self, Self::Error> {
         let proto: bitswap_pb::Message = bitswap_pb::Message::decode(bytes)?;
@@ -221,7 +241,7 @@ impl TryFrom<&[u8]> for Message {
     }
 }
 
-impl std::fmt::Debug for Message {
+impl<P: StoreParams> std::fmt::Debug for Message<P> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         let mut first = true;
         for (cid, priority) in self.want() {

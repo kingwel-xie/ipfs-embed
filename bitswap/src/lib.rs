@@ -8,7 +8,6 @@ mod protocol;
 mod stat;
 
 pub use bitswap::Bitswap;
-pub use block::Block;
 pub use block::BitswapStore;
 pub use control::Control;
 pub use ledger::Priority;

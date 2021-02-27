@@ -12,26 +12,28 @@ use libp2p_rs::swarm::substream::Substream;
 use libp2p_rs::traits::{ReadEx, WriteEx};
 
 use crate::ledger::Message;
-use crate::{BS_PROTO_ID, Block};
+use crate::{BS_PROTO_ID};
+use libipld::Block;
+use libipld::store::StoreParams;
 
 const MAX_BUF_SIZE: usize = 524_288;
 
-pub(crate) enum ProtocolEvent {
+pub(crate) enum ProtocolEvent<P> {
     NewPeer(PeerId),
     DeadPeer(PeerId),
-    Blocks(PeerId, Vec<Block>),
+    Blocks(PeerId, Vec<Block<P>>),
 }
 
 #[derive(Clone)]
-pub struct Handler {
-    incoming_tx: mpsc::UnboundedSender<(PeerId, Message)>,
-    new_peer: mpsc::UnboundedSender<ProtocolEvent>,
+pub struct Handler<P: StoreParams> {
+    incoming_tx: mpsc::UnboundedSender<(PeerId, Message<P>)>,
+    new_peer: mpsc::UnboundedSender<ProtocolEvent<P>>,
 }
 
-impl Handler {
+impl<P: StoreParams> Handler<P> {
     pub(crate) fn new(
-        incoming_tx: mpsc::UnboundedSender<(PeerId, Message)>,
-        new_peer: mpsc::UnboundedSender<ProtocolEvent>,
+        incoming_tx: mpsc::UnboundedSender<(PeerId, Message<P>)>,
+        new_peer: mpsc::UnboundedSender<ProtocolEvent<P>>,
     ) -> Self {
         Handler {
             incoming_tx,
@@ -40,7 +42,7 @@ impl Handler {
     }
 }
 
-impl UpgradeInfo for Handler {
+impl<P: StoreParams + Send> UpgradeInfo for Handler<P> {
     type Info = ProtocolId;
 
     fn protocol_info(&self) -> Vec<Self::Info> {
@@ -48,7 +50,7 @@ impl UpgradeInfo for Handler {
     }
 }
 
-impl Notifiee for Handler {
+impl<P: StoreParams> Notifiee for Handler<P> {
     fn connected(&mut self, conn: &mut Connection) {
         let peer_id = conn.remote_peer();
         let new_peers = self.new_peer.clone();
@@ -62,7 +64,7 @@ impl Notifiee for Handler {
 }
 
 #[async_trait]
-impl ProtocolHandler for Handler {
+impl<P: StoreParams + Send> ProtocolHandler for Handler<P> {
     async fn handle(
         &mut self,
         mut stream: Substream,
@@ -83,7 +85,7 @@ impl ProtocolHandler for Handler {
 }
 
 // Sends bitswap message to remote peer.
-pub(crate) async fn send_message(mut swarm: SwarmControl, peer_id: PeerId, message: Message) -> Result<(), Box<dyn Error>> {
+pub(crate) async fn send_message<P: StoreParams>(mut swarm: SwarmControl, peer_id: PeerId, message: Message<P>) -> Result<(), Box<dyn Error>> {
     log::debug!("sending message to {:?}...", peer_id);
     let mut stream = swarm.new_stream(peer_id.clone(), vec![BS_PROTO_ID.into()]).await?;
     stream.write_one(message.to_bytes().as_ref()).await?;

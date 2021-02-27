@@ -1,20 +1,17 @@
-use futures::stream::Stream;
-use futures::{future, pin_mut};
-use libipld::store::StoreParams;
 use libipld::{Cid, Result};
 use prometheus::Registry;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 mod config;
-mod peers;
 
 pub use libp2p_rs::core::identity::Keypair;
 pub use libp2p_rs::core::{Multiaddr, PeerId, ProtocolId};
 pub use libp2p_rs::kad::record::{Key, Record};
+pub use libp2p_rs::floodsub::subscription::Subscription;
+pub use libp2p_rs::floodsub::Topic;
+pub use libp2p_rs::xcli::App;
+pub use libp2p_rs::swarm::cli::swarm_cli_commands;
+pub use libp2p_rs::kad::cli::dht_cli_commands;
 
 use libp2p_rs::swarm::{Control as SwarmControl, Swarm};
 use libp2p_rs::kad::Control as KadControl;
@@ -33,12 +30,10 @@ use libp2p_rs::core::upgrade::Selector;
 use libp2p_rs::core::transport::upgrade::TransportUpgrade;
 use libp2p_rs::tcp::TcpConfig;
 
-//use bitswap::Bitswap;
+use bitswap::Bitswap;
 
 pub use crate::config::NetworkConfig;
-pub use crate::peers::{AddressSource, PeerInfo};
-pub use bitswap::BitswapStore;
-use bitswap::Bitswap;
+pub use bitswap::{BitswapStore};
 
 
 #[derive(Clone)]
@@ -108,10 +103,10 @@ impl NetworkService {
         // To start Swarm/Kad/... main loops
         swarm.start();
 
-        // // handle bootstrap nodes
-        // for (addr, peer_id) in options.bootstrap {
-        //     kad_control.add_node(peer_id, vec![addr]).await;
-        // }
+        // handle bootstrap nodes
+        for (addr, peer_id) in config.bootstrap {
+            kad_control.add_node(peer_id, vec![addr]).await;
+        }
         kad_control.bootstrap().await;
 
         Ok(NetworkService {
@@ -124,9 +119,10 @@ impl NetworkService {
     }
 
     pub fn swarm(&self) -> SwarmControl { self.swarm.clone() }
+    pub fn kad_mut(&mut self) -> &mut KadControl { &mut self.kad }
     pub fn kad(&self) -> KadControl { self.kad.clone() }
     pub fn pubsub(&self) -> FloodsubControl { self.pubsub.clone() }
-    //pub fn bitswap(&self) -> BitswapControl { self.bitswap.clone() }
+    pub fn bitswap(&self) -> BitswapControl { self.bitswap.clone() }
 
     // pub fn listeners(&self) -> Vec<Multiaddr> {
     //     let swarm = self.swarm.lock().unwrap();

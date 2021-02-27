@@ -12,11 +12,11 @@
 //! ```
 use async_trait::async_trait;
 use futures::channel::mpsc;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::StreamExt;
 pub use ipfs_embed_net::{
-    AddressSource, Key, Multiaddr, NetworkConfig, PeerId, PeerInfo, Record,
+    Key, Multiaddr, NetworkConfig, PeerId, Record,
 };
-use ipfs_embed_net::{BitswapStore, NetworkService, Keypair};
+use ipfs_embed_net::{BitswapStore, NetworkService, Keypair, Subscription, Topic, App, swarm_cli_commands, dht_cli_commands};
 pub use ipfs_embed_sqlite::{StorageConfig, TempPin};
 use ipfs_embed_sqlite::{StorageEvent, StorageService};
 use libipld::codec::References;
@@ -25,7 +25,6 @@ pub use libipld::store::DefaultParams;
 use libipld::store::{Store, StoreParams};
 use libipld::{Block, Cid, Ipld, Result};
 use prometheus::{Encoder, Registry};
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -64,6 +63,8 @@ impl<P: StoreParams> BitswapStore for BitswapStorage<P>
 where
     Ipld: References<P::Codecs>,
 {
+    type Params = P;
+
     fn contains(&mut self, cid: &Cid) -> Result<bool> {
         self.0.contains(cid)
     }
@@ -110,6 +111,17 @@ where
     /// Returns the local `PeerId`.
     pub fn local_peer_id(&self) -> PeerId {
         self.keypair.public().into_peer_id()
+    }
+
+    pub fn run_cli(&self) {
+        let mut app = App::new("xCLI");
+
+        app.add_subcommand_with_userdata(swarm_cli_commands(), Box::new(self.network.swarm()));
+        app.add_subcommand_with_userdata(dht_cli_commands(), Box::new(self.network.kad()));
+        // app.add_subcommand_with_userdata(ipfs_cli_commands(), Box::new(self.clone()));
+        // app.add_subcommand_with_userdata(bitswap_cli_commands(), Box::new(self.controls.bitswap_mut().clone()));
+
+        app.run();
     }
 
     // /// Listens on a new `Multiaddr`.
@@ -179,7 +191,7 @@ where
         let cc = connections
             .into_iter()
             .map(|c| {
-                (c.info.remote_peer_id, c.info.remote_peer_id)
+                (c.info.remote_peer_id, c.info.ra)
             })
             .collect();
 
@@ -195,9 +207,9 @@ where
     /// provides all blocks in the block store.
     pub async fn bootstrap(&self, nodes: &[(PeerId, Multiaddr)]) -> Result<()> {
         for (peer, addr) in nodes {
-            self.network.kad().add_node(*peer, vec![*addr]).await;
+            self.network.kad().add_node(*peer, vec![addr.clone()]).await;
         }
-        self.network.kad().bootstrap().await?;
+        self.network.kad().bootstrap().await;
 
         for cid in self.storage.iter()? {
             let _ = self.network.kad().provide(cid.to_bytes()).await;
@@ -225,12 +237,13 @@ where
     /// Subscribes to a `topic` returning a `Stream` of messages. If all `Stream`s for
     /// a topic are dropped it unsubscribes from the `topic`.
     pub async fn subscribe(&self, topic: &str) -> Result<Subscription> {
-        let r = self.network.pubsub().subscribe(topic.into()).await;
+        let s = self.network.pubsub().subscribe(Topic::new(topic)).await?;
+        Ok(s)
     }
 
     /// Publishes a new message in a `topic`, sending the message to all subscribed peers.
-    pub fn publish(&self, topic: &str, msg: Vec<u8>) -> Result<()> {
-        let _ = self.network.pubsub().publish(topic.into(), msg).await;
+    pub async fn publish(&self, topic: &str, msg: Vec<u8>) -> Result<()> {
+        let _ = self.network.pubsub().publish(Topic::new(topic), msg).await;
         Ok(())
     }
 
@@ -272,7 +285,7 @@ where
             let block = Block::new_unchecked(*cid, data);
             return Ok(block);
         }
-        self.network.get(*cid).await?;
+        self.network.bitswap().get(*cid).await?;
         if let Some(data) = self.storage.get(cid)? {
             let block = Block::new_unchecked(*cid, data);
             return Ok(block);
@@ -282,10 +295,15 @@ where
     }
 
     /// Inserts a block in to the block store and announces it to peers.
-    pub fn insert(&self, block: &Block<P>) -> Result<impl Future<Output = Result<()>> + '_> {
+    pub fn insert(&self, block: &Block<P>) -> Result<()> {
         let cid = *block.cid();
         self.storage.insert(block)?;
-        Ok(self.network.kad().provide(cid.to_bytes()))
+        Ok(())
+
+        // let mut bitswap = self.network.bitswap();
+        // bitswap.has_block(cid).await;
+        // let mut kad = self.network.kad();
+        // kad.provide(cid.to_bytes()).await;
     }
 
     /// Manually runs garbage collection to completion. This is mainly useful for testing and
@@ -295,10 +313,10 @@ where
         self.storage.evict().await
     }
 
-    pub fn sync(&self, cid: &Cid) -> SyncQuery<P> {
-        let missing = self.storage.missing_blocks(cid).ok().unwrap_or_default();
-        self.network.sync(*cid, missing.into_iter())
-    }
+    // pub fn sync(&self, cid: &Cid) -> SyncQuery<P> {
+    //     let missing = self.storage.missing_blocks(cid).ok().unwrap_or_default();
+    //     self.network.sync(*cid, missing.into_iter())
+    // }
 
     /// Creates, updates or removes an alias with a new root `Cid`.
     pub fn alias<T: AsRef<[u8]> + Send + Sync>(&self, alias: T, cid: Option<&Cid>) -> Result<()> {
@@ -324,7 +342,7 @@ where
     /// Registers prometheus metrics in a registry.
     pub fn register_metrics(&self, registry: &Registry) -> Result<()> {
         self.storage.register_metrics(registry)?;
-        self.network.register_metrics(registry)?;
+        //self.network.register_metrics(registry)?;
         Ok(())
     }
 }

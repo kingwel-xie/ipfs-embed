@@ -81,7 +81,7 @@ impl std::fmt::Debug for NetworkConfig {
                 &self.bitswap_connection_keepalive,
             )
             .field("bitswap_receive_limit", &self.bitswap_receive_limit)
-            .field("psk", &self.psk.is_some())
+            //.field("psk", &self.psk.is_some())
             .finish()
     }
 }
