@@ -9,14 +9,16 @@
 //! let ipfs = Ipfs::<DefaultParams>::new(Config::new(None, cache_size, "/ip4/0.0.0.0/tcp/0".parse().unwrap())).await?;
 //! ipfs.listen_on(?).await?;
 //! # Ok(()) }
-//! ```
+
+mod cli;
+
 use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
 pub use ipfs_embed_net::{
     Key, Multiaddr, NetworkConfig, PeerId, Record,
 };
-use ipfs_embed_net::{BitswapStore, NetworkService, Keypair, Subscription, Topic, App, swarm_cli_commands, dht_cli_commands};
+use ipfs_embed_net::{BitswapStore, NetworkService, Keypair, Subscription, Topic, xcli::App, swarm_cli_commands, dht_cli_commands};
 pub use ipfs_embed_sqlite::{StorageConfig, TempPin};
 use ipfs_embed_sqlite::{StorageEvent, StorageService};
 use libipld::codec::References;
@@ -27,6 +29,8 @@ use libipld::{Block, Cid, Ipld, Result};
 use prometheus::{Encoder, Registry};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use crate::cli::ipfs_cli_commands;
+use futures::Future;
 
 /// Ipfs configuration.
 #[derive(Clone, Debug)]
@@ -97,14 +101,16 @@ where
         let storage = StorageService::open(config.storage, tx)?;
         let bitswap = BitswapStorage(storage.clone());
         let network = NetworkService::new(config.network, bitswap).await?;
-        let network2 = network.clone();
 
+        let mut _kad = network.kad();
         async_global_executor::spawn(async move {
             while let Some(StorageEvent::Remove(cid)) = storage_events.next().await {
-                //network2.unprovide(cid);
+                //let _ = kad.unprovide(cid.to_bytes()).await;
+                tracing::debug!("stop providing {} ...", cid);
             }
         })
         .detach();
+
         Ok(Self { keypair, storage, network })
     }
 
@@ -118,7 +124,7 @@ where
 
         app.add_subcommand_with_userdata(swarm_cli_commands(), Box::new(self.network.swarm()));
         app.add_subcommand_with_userdata(dht_cli_commands(), Box::new(self.network.kad()));
-        // app.add_subcommand_with_userdata(ipfs_cli_commands(), Box::new(self.clone()));
+        app.add_subcommand_with_userdata(ipfs_cli_commands(), Box::new(self.clone()));
         // app.add_subcommand_with_userdata(bitswap_cli_commands(), Box::new(self.controls.bitswap_mut().clone()));
 
         app.run();
@@ -129,11 +135,11 @@ where
     //     self.network.listen_on(addr).await
     // }
 
-    // /// Returns the currently active listener addresses.
-    // pub fn listeners(&self) -> Vec<Multiaddr> {
-    //     self.network.listeners()
-    // }
-    //
+    /// Returns the currently active listener addresses.
+    pub async fn listeners(&self) -> Vec<Multiaddr> {
+        self.network.swarm().self_addrs().await.unwrap_or_default()
+    }
+
     // /// Adds an external address.
     // pub fn add_external_address(&self, addr: Multiaddr) {
     //     self.network.add_external_address(addr)
@@ -198,18 +204,10 @@ where
         cc
     }
 
-    // /// Returns the `PeerInfo` of a peer.
-    // pub fn peer_info(&self, peer: &PeerId) -> Option<PeerInfo> {
-    //     self.network.peer_info(peer)
-    // }
-
     /// Bootstraps the dht using a set of bootstrap nodes. After bootstrap completes it
     /// provides all blocks in the block store.
     pub async fn bootstrap(&self, nodes: &[(PeerId, Multiaddr)]) -> Result<()> {
-        for (peer, addr) in nodes {
-            self.network.kad().add_node(*peer, vec![addr.clone()]).await;
-        }
-        self.network.kad().bootstrap().await;
+        self.network.kad().bootstrap(nodes.to_vec()).await;
 
         for cid in self.storage.iter()? {
             let _ = self.network.kad().provide(cid.to_bytes()).await;
@@ -218,7 +216,7 @@ where
     }
 
     /// Gets a record from the dht.
-    pub async fn get_record(&self, key: &Key) -> Result<Vec<u8>> {
+    pub async fn get_record(&self, key: &[u8]) -> Result<Vec<u8>> {
         let r = self.network.kad().get_value(key.to_vec()).await?;
         Ok(r)
     }
@@ -295,15 +293,11 @@ where
     }
 
     /// Inserts a block in to the block store and announces it to peers.
-    pub fn insert(&self, block: &Block<P>) -> Result<()> {
+    pub fn insert(&self, block: &Block<P>) -> Result<impl Future<Output = Result<()>> + '_> {
         let cid = *block.cid();
         self.storage.insert(block)?;
-        Ok(())
 
-        // let mut bitswap = self.network.bitswap();
-        // bitswap.has_block(cid).await;
-        // let mut kad = self.network.kad();
-        // kad.provide(cid.to_bytes()).await;
+        Ok(self.network.bitswap_rd().has_block_rd(cid))
     }
 
     /// Manually runs garbage collection to completion. This is mainly useful for testing and
@@ -313,10 +307,14 @@ where
         self.storage.evict().await
     }
 
-    // pub fn sync(&self, cid: &Cid) -> SyncQuery<P> {
-    //     let missing = self.storage.missing_blocks(cid).ok().unwrap_or_default();
-    //     self.network.sync(*cid, missing.into_iter())
-    // }
+    pub async fn sync(&self, cid: &Cid) -> Result<()> {
+        let _missing = self.storage.missing_blocks(cid).ok().unwrap_or_default();
+
+        // Currently bitswap doesn't support sync() or get_blocks() method.
+        // It requires returning a Stream which returns a Result for every missing Cid
+        //self.network.bitswap().sync(*cid, missing);
+        Ok(())
+    }
 
     /// Creates, updates or removes an alias with a new root `Cid`.
     pub fn alias<T: AsRef<[u8]> + Send + Sync>(&self, alias: T, cid: Option<&Cid>) -> Result<()> {
@@ -502,7 +500,7 @@ mod tests {
         let store1 = create_store(false).await?;
         let store2 = create_store(false).await?;
 
-        let addr = store.listeners()[0].clone();
+        let addr = store.listeners().await[0].clone();
         let peer_id = store.local_peer_id();
         let nodes = [(peer_id, addr)];
 
@@ -515,7 +513,7 @@ mod tests {
         let block = create_block(b"test_exchange_kad")?;
         let tmp1 = store1.create_temp_pin()?;
         store1.temp_pin(&tmp1, block.cid())?;
-        store1.insert(&block)?.await?;
+        store1.insert(&block)?.await;
         store1.flush().await?;
 
         let tmp2 = store2.create_temp_pin()?;
@@ -530,15 +528,8 @@ mod tests {
         tracing_try_init();
         let store1 = create_store(true).await?;
         let block = create_block(b"test_provider_not_found")?;
-        if store1
-            .fetch(block.cid())
-            .await
-            .unwrap_err()
-            .downcast_ref::<BlockNotFound>()
-            .is_none()
-        {
-            panic!("expected block not found error");
-        }
+        assert!(store1.fetch(block.cid()).await.is_err());
+
         Ok(())
     }
 
@@ -641,21 +632,20 @@ mod tests {
         tracing_try_init();
         let stores = [create_store(false).await?, create_store(false).await?];
         stores[0]
-            .bootstrap(&[(stores[1].local_peer_id(), stores[1].listeners()[0].clone())])
+            .bootstrap(&[(stores[1].local_peer_id(), stores[1].listeners().await[0].clone())])
             .await?;
         stores[1]
-            .bootstrap(&[(stores[0].local_peer_id(), stores[0].listeners()[0].clone())])
+            .bootstrap(&[(stores[0].local_peer_id(), stores[0].listeners().await[0].clone())])
             .await?;
-        let key: Key = b"key".to_vec().into();
+        let key = b"key".to_vec();
 
         stores[0]
             .put_record(
-                Record::new(key.clone(), b"hello world".to_vec()),
-                Quorum::One,
+                key.clone(), b"hello world".to_vec()
             )
             .await?;
-        let records = stores[1].get_record(&key, Quorum::One).await?;
-        assert_eq!(records.len(), 1);
+        let records = stores[1].get_record(&key).await?;
+        assert_eq!(records.len(), 11);
         Ok(())
     }
 
@@ -676,19 +666,19 @@ mod tests {
         for store in &stores {
             for other in &stores {
                 if store.local_peer_id() != other.local_peer_id() {
-                    store.dial_address(&other.local_peer_id(), other.listeners()[0].clone())?;
+                    store.dial_address(&other.local_peer_id(), other.listeners().await[0].clone()).await?;
                 }
             }
-            subscriptions.push(store.subscribe(topic)?);
+            subscriptions.push(store.subscribe(topic).await?);
         }
 
         async_std::task::sleep(Duration::from_millis(500)).await;
 
-        stores[0].publish(&topic, b"hello world".to_vec()).unwrap();
+        stores[0].publish(&topic, b"hello world".to_vec()).await.unwrap();
 
         for subscription in &mut subscriptions[1..] {
             if let Some(msg) = subscription.next().await {
-                assert_eq!(msg.as_slice(), &b"hello world"[..]);
+                assert_eq!(msg.data, &b"hello world"[..]);
             }
         }
         Ok(())

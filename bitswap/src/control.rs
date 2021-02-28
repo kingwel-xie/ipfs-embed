@@ -41,6 +41,12 @@ impl Control {
         rx.await?
     }
 
+    pub async fn has_block_rd(&self, cid: Cid) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.0.clone().send(ControlCommand::HasBlock(cid, tx)).await?;
+        rx.await?
+    }
+
     /// Cancels the wanted block.
     ///
     /// A user request

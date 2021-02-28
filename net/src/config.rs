@@ -13,7 +13,7 @@ pub struct NetworkConfig {
     /// Bound listening addresses; by default the node will not listen on any address.
     pub listening_addrs: Vec<Multiaddr>,
     /// The peers to connect to on startup.
-    pub bootstrap: Vec<(Multiaddr, PeerId)>,
+    pub bootstrap: Vec<(PeerId, Multiaddr)>,
     /// Enable mdns.
     pub enable_mdns: bool,
     /// Enable kad.

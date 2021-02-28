@@ -212,7 +212,7 @@ impl<TBlockstore, TRouting> Bitswap<TBlockstore, TRouting>
 
         if !to_check.is_empty() {
             // ask blockstore for the wanted blocks
-            log::debug!("{:?} asking for {} block(s), checking blockstore", source, to_check.len());
+            //log::debug!("{:?} asking for {} block(s), checking blockstore", source, to_check.len());
             let mut blockstore = self.blockstore.clone();
             let mut poster = self.peer_tx.clone();
             task::spawn(async move {
@@ -329,12 +329,13 @@ impl<TBlockstore, TRouting> Bitswap<TBlockstore, TRouting>
         let mut swarm = self.swarm.clone().expect("Swarm??");
         let key = cid.to_bytes();
         task::spawn(async move {
-            let r = routing.find_providers(key, 1).await;
+            let r = routing.find_providers(key, 3).await;
+            log::info!("want_block: {:?}", r);
             if let Ok(peers) = r {
-                // open a connection toward the providers, so that bitswap could be happy
+                // open a connection toward the providers, so that bitswap would be happy
                 // to fetch the wanted blocks
                 for peer in peers {
-                    let _ = swarm.new_connection_no_routing(peer).await;
+                    let _ = swarm.new_connection(peer).await;
                 }
             }
         });

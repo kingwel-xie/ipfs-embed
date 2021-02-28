@@ -1,7 +1,15 @@
 
-use async_std::task;
-use xcli::*;
 use crate::Ipfs;
+
+
+use async_global_executor::block_on;
+
+use std::convert::TryFrom;
+use libipld::DefaultParams;
+use libipld::multihash::Code;
+use libipld::cbor::DagCborCodec;
+use libipld::Cid;
+use ipfs_embed_net::xcli::*;
 
 const IPFS: &str = "ipfs";
 
@@ -24,25 +32,11 @@ pub fn ipfs_cli_commands<'a>() -> Command<'a> {
         .subcommand(put_block_cmd)
 }
 
-use ipfs_embed_core::{
-    AddressRecord, BitswapStorage, BitswapSync, Block, Cid, Multiaddr, Network, NetworkEvent,
-    PeerId, Query, QueryResult, QueryType, Result, Storage, StorageEvent, StoreParams,
-};
-use libipld::codec::References;
-use libipld::ipld::Ipld;
-use std::convert::TryFrom;
-use ipfs_embed_core::Store;
-use libipld::DefaultParams;
-use ipfs_embed_net::NetworkService;
-use std::sync::Arc;
-use ipfs_embed_db::StorageService;
-use libipld::multihash::Code;
-use libipld::cbor::DagCborCodec;
 
-fn handler(app: &App) -> Ipfs<DefaultParams, StorageService<DefaultParams>, NetworkService<DefaultParams>>
+fn handler(app: &App) -> Ipfs<DefaultParams>
 {
     let value_any = app.get_handler(IPFS).expect(IPFS);
-    let ipfs = value_any.downcast_ref::<Ipfs<_, _, _>>().expect("ipfs").clone();
+    let ipfs = value_any.downcast_ref::<Ipfs<_>>().expect("ipfs").clone();
     ipfs
 }
 
@@ -55,12 +49,12 @@ fn cli_get_block(app: &App, args: &[&str]) -> XcliResult {
         return Err(XcliError::MismatchArgument(1, args.len()));
     };
 
-    task::block_on(async {
-        let r = ipfs.get(&cid).await;
-        if let Ok(data) = r {
-            println!("{} {:?}", data.cid(), data.data());
+    block_on(async {
+        let r = ipfs.fetch(&cid).await;
+        match r {
+            Ok(data) => println!("{} {:?}", data.cid(), data.data()),
+            Err(e) => println!("not found: {:?}", e),
         }
-
     });
 
     Ok(CmdExeCode::Ok)
@@ -75,11 +69,13 @@ fn cli_put_block(app: &App, args: &[&str]) -> XcliResult {
         return Err(XcliError::MismatchArgument(1, args.len()));
     };
 
-    let ipld_block = libipld::Block::encode(DagCborCodec, Code::Sha2_256, &string).map_err(|e|XcliError::BadArgument(e.to_string()))?;
+    //let ipld_block = libipld::Block::encode(DagCborCodec, Code::Sha2_256, &string).map_err(|e|XcliError::BadArgument(e.to_string()))?;
 
-    task::block_on(async {
-        let data = ipfs.insert(&ipld_block).await;
-        println!("{} {:?}", ipld_block.cid(), data);
+    block_on(async {
+        // let data = ipfs.insert(&ipld_block)?.await;
+        // println!("{} {:?}", ipld_block.cid(), data);
+
+
     });
 
     Ok(CmdExeCode::Ok)

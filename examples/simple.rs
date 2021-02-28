@@ -1,6 +1,6 @@
 use ipfs_embed::{Config, DefaultParams, Ipfs};
 
-use libipld::{DagCbor, Block};
+use libipld::DagCbor;
 use libipld::cbor::DagCborCodec;
 use libipld::multihash::Code;
 
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cache_size = 10;
     let mut config = Config::new(None, cache_size, "/ip4/0.0.0.0/tcp/8082".parse()?);
-    config.network.bootstrap.push(("/ip4/104.131.131.82/tcp/4001".parse().unwrap(), "QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ".parse().unwrap()));
+    config.network.bootstrap.push(("QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ".parse()?, "/ip4/104.131.131.82/tcp/4001".parse()?));
 
     let ipfs = Ipfs::<DefaultParams>::new(config).await?;
 

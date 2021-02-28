@@ -1,5 +1,5 @@
-use libipld::{Cid, Result};
-use prometheus::Registry;
+use libipld::Result;
+//use prometheus::Registry;
 use std::time::Duration;
 
 mod config;
@@ -9,7 +9,7 @@ pub use libp2p_rs::core::{Multiaddr, PeerId, ProtocolId};
 pub use libp2p_rs::kad::record::{Key, Record};
 pub use libp2p_rs::floodsub::subscription::Subscription;
 pub use libp2p_rs::floodsub::Topic;
-pub use libp2p_rs::xcli::App;
+pub use libp2p_rs::xcli;
 pub use libp2p_rs::swarm::cli::swarm_cli_commands;
 pub use libp2p_rs::kad::cli::dht_cli_commands;
 
@@ -34,12 +34,12 @@ use bitswap::Bitswap;
 
 pub use crate::config::NetworkConfig;
 pub use bitswap::{BitswapStore};
+use libp2p_rs::dns::DnsConfig;
+use libp2p_rs::core::Transport;
 
 
 #[derive(Clone)]
 pub struct NetworkService {
-    //repo: Repo<Types>,
-
     swarm: SwarmControl,
     kad: KadControl,
     pubsub: FloodsubControl,
@@ -57,9 +57,9 @@ impl NetworkService {
         let sec_noise = noise::NoiseConfig::xx(xx_keypair, config.node_key.clone());
         let sec = Selector::new(sec_noise, sec_secio);
 
-        // FIXME: timeout & DnsConfig
         let mux = Selector::new(yamux::Config::new(), mplex::Config::new());
-        let tu = TransportUpgrade::new(TcpConfig::new().nodelay(true), mux, sec);//.timeout(Duration::from_secs(20));
+        let transport = TcpConfig::new().nodelay(true).outbound_timeout(Duration::from_secs(10));
+        let tu = TransportUpgrade::new(DnsConfig::new(transport), mux, sec);
 
         // Make swarm
         let mut swarm = Swarm::new(config.node_key.public())
@@ -71,7 +71,7 @@ impl NetworkService {
 
         let swarm_control = swarm.control();
 
-        log::info!("Swarm created, local-peer-id={:?}", swarm.local_peer_id());
+        tracing::info!("Swarm created, local-peer-id={:?}", swarm.local_peer_id());
 
         // build Kad
         let kad_config = KademliaConfig::default().with_query_timeout(Duration::from_secs(90));
@@ -104,10 +104,9 @@ impl NetworkService {
         swarm.start();
 
         // handle bootstrap nodes
-        for (addr, peer_id) in config.bootstrap {
-            kad_control.add_node(peer_id, vec![addr]).await;
+        if !config.bootstrap.is_empty() {
+            kad_control.bootstrap(config.bootstrap.clone()).await;
         }
-        kad_control.bootstrap().await;
 
         Ok(NetworkService {
             swarm: swarm_control,
@@ -124,144 +123,8 @@ impl NetworkService {
     pub fn pubsub(&self) -> FloodsubControl { self.pubsub.clone() }
     pub fn bitswap(&self) -> BitswapControl { self.bitswap.clone() }
 
-    // pub fn listeners(&self) -> Vec<Multiaddr> {
-    //     let swarm = self.swarm.lock().unwrap();
-    //     Swarm::listeners(&swarm).cloned().collect()
-    // }
-    //
-    // pub fn add_external_address(&self, addr: Multiaddr) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     Swarm::add_external_address(&mut swarm, addr, AddressScore::Infinite);
-    // }
-    //
-    // pub fn external_addresses(&self) -> Vec<AddressRecord> {
-    //     let swarm = self.swarm.lock().unwrap();
-    //     Swarm::external_addresses(&swarm).cloned().collect()
-    // }
-    //
-    // pub fn add_address(&self, peer: &PeerId, addr: Multiaddr) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     swarm.add_address(peer, addr, AddressSource::User);
-    // }
-    //
-    // pub fn remove_address(&self, peer: &PeerId, addr: &Multiaddr) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     swarm.remove_address(peer, addr);
-    // }
-    //
-    // pub fn dial(&self, peer: &PeerId) -> Result<()> {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     Ok(Swarm::dial(&mut swarm, peer)?)
-    // }
-    //
-    // pub fn ban(&self, peer: PeerId) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     Swarm::ban_peer_id(&mut swarm, peer)
-    // }
-    //
-    // pub fn unban(&self, peer: PeerId) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     Swarm::unban_peer_id(&mut swarm, peer)
-    // }
-    //
-    // pub fn peers(&self) -> Vec<PeerId> {
-    //     let swarm = self.swarm.lock().unwrap();
-    //     swarm.peers().copied().collect()
-    // }
-    //
-    // pub fn connections(&self) -> Vec<(PeerId, Multiaddr)> {
-    //     let swarm = self.swarm.lock().unwrap();
-    //     swarm
-    //         .connections()
-    //         .map(|(peer_id, addr)| (*peer_id, addr.clone()))
-    //         .collect()
-    // }
-    //
-    // pub fn peer_info(&self, peer: &PeerId) -> Option<PeerInfo> {
-    //     let swarm = self.swarm.lock().unwrap();
-    //     swarm.info(peer).cloned()
-    // }
-    //
-    // pub async fn bootstrap(&self, peers: &[(PeerId, Multiaddr)]) -> Result<()> {
-    //     for (peer, addr) in peers {
-    //         self.add_address(peer, addr.clone());
-    //         self.dial(peer)?;
-    //     }
-    //     let rx = {
-    //         let mut swarm = self.swarm.lock().unwrap();
-    //         swarm.bootstrap()
-    //     };
-    //     tracing::trace!("started bootstrap");
-    //     rx.await??;
-    //     tracing::trace!("boostrap complete");
-    //     Ok(())
-    // }
-    //
-    // pub async fn get_record(&self, key: &Key, quorum: Quorum) -> Result<Vec<PeerRecord>> {
-    //     let rx = {
-    //         let mut swarm = self.swarm.lock().unwrap();
-    //         swarm.get_record(key, quorum)
-    //     };
-    //     Ok(rx.await??)
-    // }
-    //
-    // pub async fn put_record(&self, record: Record, quorum: Quorum) -> Result<()> {
-    //     let rx = {
-    //         let mut swarm = self.swarm.lock().unwrap();
-    //         swarm.put_record(record, quorum)
-    //     };
-    //     rx.await??;
-    //     Ok(())
-    // }
-    //
-    // pub fn subscribe(&self, topic: &str) -> Result<impl Stream<Item = Vec<u8>>> {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     swarm.subscribe(topic)
-    // }
-    //
-    // pub fn publish(&self, topic: &str, msg: Vec<u8>) -> Result<()> {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     swarm.publish(topic, msg)
-    // }
-    //
-    // pub fn remove_record(&self, key: &Key) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     swarm.remove_record(key)
-    // }
-    //
-    // pub fn get(&self, cid: Cid) -> GetQuery<P> {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     let (rx, id) = swarm.get(cid);
-    //     GetQuery {
-    //         swarm: Some(self.swarm.clone()),
-    //         id,
-    //         rx,
-    //     }
-    // }
-    //
-    // pub fn sync(&self, cid: Cid, missing: impl Iterator<Item = Cid>) -> SyncQuery<P> {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     let (rx, id) = swarm.sync(cid, missing);
-    //     SyncQuery {
-    //         swarm: Some(self.swarm.clone()),
-    //         id,
-    //         rx,
-    //     }
-    // }
-    //
-    // pub async fn provide(&self, cid: Cid) -> Result<()> {
-    //     let rx = {
-    //         let mut swarm = self.swarm.lock().unwrap();
-    //         swarm.provide(cid)
-    //     };
-    //     rx.await??;
-    //     Ok(())
-    // }
-    //
-    // pub fn unprovide(&self, cid: Cid) {
-    //     let mut swarm = self.swarm.lock().unwrap();
-    //     swarm.unprovide(cid)
-    // }
+    pub fn bitswap_rd(&self) -> &BitswapControl { &self.bitswap }
+
     //
     // pub fn register_metrics(&self, registry: &Registry) -> Result<()> {
     //     let swarm = self.swarm.lock().unwrap();
